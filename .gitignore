@@ -1,0 +1,27 @@
+# AI
+.codex
+.specify
+
+# Editor
+.vscode
+
+# Language Specifics
+
+## JavaScript/TypeScript
+node_modules
+
+## Python
+__pycache__
+.ruff_cache
+.venv
+
+## Rust
+target
+
+# System
+.DS_Store
+
+# General Ignores
+*.bak
+.env
+tmp
