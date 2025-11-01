@@ -1,5 +1,5 @@
 {
-  "id": 3893642,
+  "id": 9349786,
   "name": "default",
   "target": "branch",
   "source_type": "Repository",
@@ -29,7 +29,7 @@
     {
       "type": "merge_queue",
       "parameters": {
-        "merge_method": "MERGE",
+        "merge_method": "SQUASH",
         "max_entries_to_build": 5,
         "min_entries_to_merge": 1,
         "max_entries_to_merge": 5,
@@ -93,6 +93,12 @@
       "parameters": {
         "review_on_push": true,
         "review_draft_pull_requests": false
+      }
+    },
+    {
+      "type": "code_quality",
+      "parameters": {
+        "severity": "errors"
       }
     }
   ],

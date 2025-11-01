@@ -1,0 +1,345 @@
+openapi: 3.1.0
+info:
+  title: JWKS Cache Control Plane API
+  version: 0.1.0
+  description: |
+    Control and retrieval API for the production JWKS cache. Enables multi-tenant registration,
+    on-demand refresh, metrics inspection, and JWKS retrieval with HTTP caching semantics.
+servers:
+  - url: https://jwks-cache.example.com
+paths:
+  /tenants/{tenant_id}/providers/{provider_id}:
+    put:
+      summary: Register or update a JWKS provider for a tenant
+      operationId: upsertProvider
+      tags: [Providers]
+      parameters:
+        - $ref: '#/components/parameters/TenantId'
+        - $ref: '#/components/parameters/ProviderId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IdentityProviderConfig'
+      responses:
+        '202':
+          description: Provider accepted for refresh and availability
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProviderStatus'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+    delete:
+      summary: Remove a provider and purge cached JWKS
+      operationId: deleteProvider
+      tags: [Providers]
+      parameters:
+        - $ref: '#/components/parameters/TenantId'
+        - $ref: '#/components/parameters/ProviderId'
+      responses:
+        '204':
+          description: Provider removed
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /tenants/{tenant_id}/providers/{provider_id}/jwks:
+    get:
+      summary: Retrieve the latest JWKS for a tenant provider
+      operationId: getJwks
+      tags: [JWKS]
+      parameters:
+        - $ref: '#/components/parameters/TenantId'
+        - $ref: '#/components/parameters/ProviderId'
+        - in: query
+          name: kid
+          schema:
+            type: string
+          description: Preferred key identifier to select
+        - in: header
+          name: If-None-Match
+          schema:
+            type: string
+          description: Optional cached ETag for conditional requests
+        - in: header
+          name: If-Modified-Since
+          schema:
+            type: string
+            format: date-time
+          description: Optional timestamp for conditional retrieval
+      responses:
+        '200':
+          description: JWKS payload delivered
+          headers:
+            ETag:
+              description: Cache validator for the JWKS document
+              schema:
+                type: string
+            Last-Modified:
+              description: Last modification timestamp advertised by upstream
+              schema:
+                type: string
+                format: date-time
+            Cache-Control:
+              description: Cache directives computed by the cache
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JwksResponse'
+        '304':
+          description: JWKS not modified; client may reuse cached body
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '410':
+          description: Provider removed and JWKS unavailable
+        '425':
+          description: JWKS being refreshed; client should retry after Retry-After header
+        '502':
+          $ref: '#/components/responses/UpstreamError'
+
+  /tenants/{tenant_id}/providers/{provider_id}/refresh:
+    post:
+      summary: Trigger immediate refresh of a provider JWKS
+      operationId: refreshProvider
+      tags: [Providers]
+      parameters:
+        - $ref: '#/components/parameters/TenantId'
+        - $ref: '#/components/parameters/ProviderId'
+      responses:
+        '202':
+          description: Refresh scheduled or already in progress
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /tenants/{tenant_id}/providers/{provider_id}/status:
+    get:
+      summary: Inspect provider cache status, metrics, and error counters
+      operationId: getProviderStatus
+      tags: [Observability]
+      parameters:
+        - $ref: '#/components/parameters/TenantId'
+        - $ref: '#/components/parameters/ProviderId'
+      responses:
+        '200':
+          description: Provider status snapshot
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProviderStatus'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+components:
+  parameters:
+    TenantId:
+      name: tenant_id
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: '^[a-zA-Z0-9-]{1,64}$'
+      description: Unique identifier for the tenant
+    ProviderId:
+      name: provider_id
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: '^[a-zA-Z0-9_-]{1,64}$'
+      description: Identifier for the provider within the tenant
+
+  schemas:
+    IdentityProviderConfig:
+      type: object
+      required:
+        - jwksUrl
+      properties:
+        jwksUrl:
+          type: string
+          format: uri
+          description: HTTPS JWKS endpoint
+        refreshEarly:
+          type: string
+          format: duration
+          default: PT30S
+        staleWhileError:
+          type: string
+          format: duration
+          default: PT60S
+        minTtl:
+          type: string
+          format: duration
+          default: PT30S
+        maxTtl:
+          type: string
+          format: duration
+          default: PT24H
+        maxResponseBytes:
+          type: integer
+          format: int64
+          default: 1048576
+        negativeCacheTtl:
+          type: string
+          format: duration
+          default: PT30S
+        requireHttps:
+          type: boolean
+          default: true
+        allowedDomains:
+          type: array
+          items:
+            type: string
+            format: hostname
+        maxRedirects:
+          type: integer
+          format: int32
+          default: 3
+          maximum: 10
+        pinnedSpki:
+          type: array
+          items:
+            type: string
+            description: Base64-encoded SHA-256 fingerprint
+        prefetchJitter:
+          type: string
+          format: duration
+          default: PT5S
+        retryPolicy:
+          $ref: '#/components/schemas/RetryPolicy'
+    RetryPolicy:
+      type: object
+      properties:
+        maxRetries:
+          type: integer
+          format: int32
+          default: 2
+        attemptTimeout:
+          type: string
+          format: duration
+          default: PT3S
+        initialBackoff:
+          type: string
+          format: duration
+          default: PT0.25S
+        maxBackoff:
+          type: string
+          format: duration
+          default: PT2S
+        deadline:
+          type: string
+          format: duration
+          default: PT8S
+        jitter:
+          type: string
+          enum: [none, full, decorrelated]
+          default: full
+    JwksResponse:
+      type: object
+      required:
+        - keys
+      properties:
+        keys:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+          description: JWKS keys as delivered by upstream provider
+        servedFromCache:
+          type: boolean
+          description: Indicates whether response was from cache or upstream
+        stale:
+          type: boolean
+          description: True when served under stale-while-error policy
+        expiresAt:
+          type: string
+          format: date-time
+          description: Absolute expiration timestamp in UTC
+    ProviderStatus:
+      type: object
+      properties:
+        state:
+          type: string
+          enum: [Empty, Loading, Ready, Refreshing]
+        lastRefresh:
+          type: string
+          format: date-time
+        nextRefresh:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+        errorCount:
+          type: integer
+          format: int32
+        hitRate:
+          type: number
+          format: float
+          description: Rolling cache hit ratio
+        staleServeRatio:
+          type: number
+          format: float
+        metrics:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              value:
+                type: number
+              labels:
+                type: object
+                additionalProperties:
+                  type: string
+    ErrorResponse:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+        details:
+          type: object
+          additionalProperties: true
+
+  responses:
+    BadRequest:
+      description: Request failed validation
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Forbidden:
+      description: Request violated security policy (e.g., HTTP URL)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Conflict:
+      description: Conflicting registration or concurrent update
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    NotFound:
+      description: Provider or tenant not registered
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    UpstreamError:
+      description: Upstream JWKS provider error details
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'

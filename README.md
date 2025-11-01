@@ -1,88 +1,194 @@
 <div align="center">
 
-# <NAME>
+# jwks-cache
 
-### <DESCRIPTION>
+### High-performance async JWKS cache with ETag revalidation, early refresh, and multi-tenant support — built for modern Rust identity systems.
 
 [![License](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
-[![Docs](https://img.shields.io/docsrs/<NAME>)](https://docs.rs/<NAME>)
-[![Rust](https://github.com/hack-ink/<NAME>/actions/workflows/rust.yml/badge.svg?branch=main)](https://github.com/hack-ink/<NAME>/actions/workflows/rust.yml)
-[![Release](https://github.com/hack-ink/<NAME>/actions/workflows/release.yml/badge.svg)](https://github.com/hack-ink/<NAME>/actions/workflows/release.yml)
-[![GitHub tag (latest by date)](https://img.shields.io/github/v/tag/hack-ink/<NAME>)](https://github.com/hack-ink/<NAME>/tags)
-[![GitHub last commit](https://img.shields.io/github/last-commit/hack-ink/<NAME>?color=red&style=plastic)](https://github.com/hack-ink/<NAME>)
-[![GitHub code lines](https://tokei.rs/b1/github/hack-ink/<NAME>)](https://github.com/hack-ink/<NAME>)
+[![Docs](https://img.shields.io/docsrs/jwks-cache)](https://docs.rs/jwks-cache)
+[![Rust](https://github.com/hack-ink/jwks-cache/actions/workflows/rust.yml/badge.svg?branch=main)](https://github.com/hack-ink/jwks-cache/actions/workflows/rust.yml)
+[![Release](https://github.com/hack-ink/jwks-cache/actions/workflows/release.yml/badge.svg)](https://github.com/hack-ink/jwks-cache/actions/workflows/release.yml)
+[![GitHub tag (latest by date)](https://img.shields.io/github/v/tag/hack-ink/jwks-cache)](https://github.com/hack-ink/jwks-cache/tags)
+[![GitHub last commit](https://img.shields.io/github/last-commit/hack-ink/jwks-cache?color=red&style=plastic)](https://github.com/hack-ink/jwks-cache)
+[![GitHub code lines](https://tokei.rs/b1/github/hack-ink/jwks-cache)](https://github.com/hack-ink/jwks-cache)
 
 </div>
 
-## Feature Highlights
+## Table of Contents
 
-### TODO
+- [Why jwks-cache?](#why-jwks-cache)
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [Validating Tokens](#validating-tokens)
+- [Registry Configuration](#registry-configuration)
+- [Observability](#observability)
+- [Persistence & Warm Starts](#persistence--warm-starts)
+- [Development](#development)
+- [Support](#support)
+- [Acknowledgements](#acknowledgements)
+- [License](#license)
 
-TODO
+## Why jwks-cache?
 
-## Status
+- **HTTP-aware caching**: honours `Cache-Control`, `Expires`, `ETag`, and `Last-Modified` headers via `http-cache-semantics`, so refresh cadence tracks the upstream contract instead of guessing TTLs.
+- **Resilient refresh loop**: background workers use single-flight guards, exponential backoff with jitter, and bounded stale-while-error windows to minimise pressure on identity providers.
+- **Multi-tenant registry**: isolate registrations per tenant, enforce HTTPS, and restrict redirect targets with domain allowlists or SPKI pinning.
+- **Built-in observability**: metrics, traces, and status snapshots are emitted with tenant/provider labels to simplify debugging and SLO tracking.
+- **Optional persistence**: Redis-backed snapshots allow the cache to warm-start without stampeding third-party JWKS endpoints after deploys or restarts.
 
-TODO
+## Installation
 
-## Usage
+Add the crate to your project and enable optional integrations as needed:
 
-### Installation
-
-#### Build from Source
-
-```sh
-# Clone the repository.
-git clone https://github.com/hack-ink/<NAME>
-cd <NAME>
-
-# To install Rust on macOS and Unix, run the following command.
-#
-# To install Rust on Windows, download and run the installer from `https://rustup.rs`.
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --default-toolchain stable
-
-# Install the necessary dependencies. (Unix only)
-# Using Ubuntu as an example, this really depends on your distribution.
-sudo apt-get update
-sudo apt-get install <DEPENDENCIES>
-
-# Build the project, and the binary will be available at `target/release/<NAME>`.
-cargo build --release
-
-# If you are a macOS user and want to have a `<NAME>.app`, run the following command.
-# Install `cargo-bundle` to pack the binary into an app.
-cargo install cargo-bundle
-# Pack the app, and the it will be available at `target/release/bundle/osx/<NAME>.app`.
-cargo bundle --release
+```toml
+# Cargo.toml
+[dependencies]
+# Drop `redis` if persistence is unnecessary.
+jwks-cache = { version = "0.1", features = ["redis"] }
+jsonwebtoken = { version = "10.1" }
+metrics = { version = "0.24" }
+reqwest = { version = "0.12", features = ["http2", "json", "rustls-tls", "stream"] }
+tracing = { version = "0.1" }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
 ```
 
-#### Download Pre-built Binary
+The crate is fully async and designed for the Tokio multi-threaded runtime.
 
-- **macOS**
-    - Download the latest pre-built binary from [GitHub Releases](https://github.com/hack-ink/<NAME>/releases/latest).
-- **Windows**
-    - TODO
-- **Unix**
-    - TODO
+## Quick Start
 
-### Configuration
+```rust
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+	tracing_subscriber::fmt::init();
+	// Optional Prometheus exporter (metrics are always sent via the `metrics` facade).
+	jwks_cache::install_default_exporter()?;
 
-#### TODO
+	let registry = jwks_cache::Registry::builder()
+		.require_https(true)
+		.add_allowed_domain("tenant-a.auth0.com")
+		.with_redis_client(redis::Client::open("redis://127.0.0.1/")?)
+		.build();
+	let mut registration = jwks_cache::IdentityProviderRegistration::new(
+		"tenant-a",
+		"auth0",
+		"https://tenant-a.auth0.com/.well-known/jwks.json",
+	)?;
 
-TODO
+	registration.stale_while_error = std::time::Duration::from_secs(90);
+	registry.register(registration).await?;
 
-### Interaction
+	let jwks = registry.resolve("tenant-a", "auth0", None).await?;
 
-TODO
+	println!("Fetched {} keys.", jwks.keys.len());
 
-### Update
+	// No-op unless the `redis` feature is enabled.
+	registry.persist_all().await?;
 
-TODO
+	Ok(())
+}
+```
+
+## Validating Tokens
+
+Use the registry to resolve a `kid` and build a `DecodingKey` for `jsonwebtoken`:
+
+```rust
+use jsonwebtoken::{Algorithm, DecodingKey, Validation};
+use jwks_cache::Registry;
+use serde::Deserialize;
+
+#[derive(Debug, Deserialize)]
+struct Claims {
+	sub: String,
+	exp: usize,
+	aud: Vec<String>,
+}
+
+async fn verify(registry: &Registry, token: &str) -> Result<Claims, Box<dyn std::error::Error>> {
+	let header = jsonwebtoken::decode_header(token)?;
+	let kid = header.kid.ok_or("token is missing a kid claim")?;
+	let jwks = registry.resolve("tenant-a", "auth0", Some(&kid)).await?;
+	let jwk = jwks.find(&kid).ok_or("no JWKS entry found for kid")?;
+	let decoding_key = DecodingKey::from_jwk(jwk)?;
+	let mut validation = Validation::new(header.alg);
+
+	validation.set_audience(&["api://default"]);
+
+	let token = jsonwebtoken::decode::<Claims>(token, &decoding_key, &validation)?;
+
+	Ok(token.claims)
+}
+```
+
+The optional third argument to `Registry::resolve` lets you pass the `kid` up front, enabling cache hits even when providers rotate keys frequently.
+
+## Registry Configuration
+
+`Registry` keeps tenant/provider state isolated while applying consistent guardrails. The most relevant knobs on `IdentityProviderRegistration` are:
+
+| Field                | Purpose                                          | Default                                                                                       |
+| -------------------- | ------------------------------------------------ | --------------------------------------------------------------------------------------------- |
+| `refresh_early`      | Proactive refresh lead time before TTL expiry.   | `30s` (overridable globally via `RegistryBuilder::default_refresh_early`)                     |
+| `stale_while_error`  | Serve cached payloads while refreshes fail.      | `60s` (overridable via `default_stale_while_error`)                                           |
+| `min_ttl`            | Floor applied to upstream cache directives.      | `30s`                                                                                         |
+| `max_ttl`            | Cap applied to upstream TTLs.                    | `24h`                                                                                         |
+| `max_response_bytes` | Maximum JWKS payload size accepted.              | `1_048_576 bytes`                                                                             |
+| `negative_cache_ttl` | Optional TTL for failed upstream fetches.        | Disabled (`0s`)                                                                               |
+| `max_redirects`      | Upper bound on HTTP redirects while fetching.    | `3` (hard limit `10`)                                                                         |
+| `prefetch_jitter`    | Randomised offset applied to refresh scheduling. | `5s`                                                                                          |
+| `retry_policy`       | Exponential backoff configuration for fetches.   | Initial attempt + 2 retries, 250 ms → 2 s backoff, 3 s per attempt, 8 s deadline, full jitter |
+| `pinned_spki`        | SHA-256 SPKI fingerprints for TLS pinning.       | Empty                                                                                         |
+
+### Multi-tenant operations
+
+- `register` / `unregister` keep provider state scoped to each tenant.
+- `resolve` serves cached JWKS payloads with per-tenant metrics tagging.
+- `refresh` triggers an immediate background refresh without waiting for TTL expiry.
+- `provider_status` and `all_statuses` expose lifecycle state, expiry, error counters, hit rates, and the metrics that power `jwks-cache.openapi.yaml`.
+
+### Security controls
+
+- `RegistryBuilder::require_https(true)` (default) enforces HTTPS for every registration.
+- Domain allowlists can be applied globally (`add_allowed_domain`) or per registration (`allowed_domains`).
+- Provide `pinned_spki` values (base64 SHA-256) to guard against certificate substitution.
+
+### Feature flags
+
+- `redis`: enable Redis-backed snapshots for `persist_all` and `restore_from_persistence`. When disabled, these methods are cheap no-ops so lifecycle code can stay shared.
+
+## Observability
+
+- Metrics emitted via the `metrics` facade include `jwks_cache_requests_total`, `jwks_cache_hits_total`, `jwks_cache_misses_total`, `jwks_cache_stale_total`, `jwks_cache_refresh_total`, `jwks_cache_refresh_errors_total`, and the `jwks_cache_refresh_duration_seconds` histogram.
+- `install_default_exporter` installs the bundled Prometheus recorder (`metrics-exporter-prometheus`) and exposes a `PrometheusHandle` for HTTP servers to serve `/metrics`.
+- Every cache operation is instrumented with `tracing` spans keyed by tenant and provider identifiers, making it easy to correlate logs, traces, and metrics.
+
+## Persistence & Warm Starts
+
+Enable the `redis` feature to persist JWKS payloads between deploys:
+
+```rust
+let registry = jwks_cache::Registry::builder()
+	.require_https(true)
+	.add_allowed_domain("tenant-a.auth0.com")
+	.with_redis_client(redis::Client::open("redis://127.0.0.1/")?)
+	.build();
+
+// During startup:
+registry.restore_from_persistence().await?;
+// On graceful shutdown:
+registry.persist_all().await?;
+```
+
+Snapshots store the JWKS body, validators, and expiry metadata, keeping cold starts off identity provider rate limits.
 
 ## Development
 
-### Architecture
+- `cargo fmt`
+- `cargo clippy --all-targets --all-features`
+- `cargo test`
+- `cargo test --features redis` (integration coverage for Redis persistence)
 
-TODO
+Integration tests rely on `wiremock` to exercise HTTP caching behaviour, retries, and stale-while-error semantics.
 
 ## Support Me
 
@@ -107,7 +213,7 @@ Thank you for your support!
 
 We would like to extend our heartfelt gratitude to the following projects and contributors:
 
-- The Rust community for their continuous support and development of the Rust ecosystem.
+Grateful for the Rust community and the maintainers of `reqwest`, `http-cache-semantics`, `metrics`, `redis`, and `tracing`, whose work makes this cache possible.
 
 ## Additional Acknowledgements
 
