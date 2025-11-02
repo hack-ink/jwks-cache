@@ -49,7 +49,7 @@ jsonwebtoken = { version = "10.1" }
 metrics = { version = "0.24" }
 reqwest = { version = "0.12", features = ["http2", "json", "rustls-tls", "stream"] }
 tracing = { version = "0.1" }
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
+tokio = { version = "1.48", features = ["macros", "rt-multi-thread", "sync", "time"] }
 ```
 
 The crate is fully async and designed for the Tokio multi-threaded runtime.
