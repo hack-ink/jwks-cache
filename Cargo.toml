@@ -1,13 +1,15 @@
 [package]
 authors     = ["Xavier Lau <x@acg.box>"]
+categories  = ["asynchronous", "authentication", "caching", "cryptography", "web-programming::http-client"]
 description = "High-performance async JWKS cache with ETag revalidation, early refresh, and multi-tenant support — built for modern Rust identity systems."
 edition     = "2024"
 homepage    = "https://hack.ink/jwks-cache"
+keywords    = ["async", "http-cache", "jwks", "jwt", "reqwest"]
 license     = "GPL-3.0"
 name        = "jwks-cache"
 readme      = "README.md"
 repository  = "https://github.com/hack-ink/jwks-cache"
-version     = "0.1.2"
+version     = "0.1.3"
 
 [profile.ci-dev]
 incremental = false
