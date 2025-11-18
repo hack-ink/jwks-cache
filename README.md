@@ -2,7 +2,7 @@
 
 # jwks-cache
 
-### High-performance async JWKS cache with ETag revalidation, early refresh, and multi-tenant support — built for modern Rust identity systems.
+High-performance async JWKS cache with ETag revalidation, early refresh, and multi-tenant support — built for modern Rust identity systems.
 
 [![License](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![Docs](https://img.shields.io/docsrs/jwks-cache)](https://docs.rs/jwks-cache)
