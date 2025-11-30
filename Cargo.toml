@@ -26,7 +26,7 @@ default = []
 # crates.io
 base64                      = { version = "0.22" }
 chrono                      = { version = "0.4", features = ["serde"] }
-http                        = { version = "1.3" }
+http                        = { version = "1.4" }
 http-cache-semantics        = { version = "2.1" }
 httpdate                    = { version = "1.0" }
 jsonwebtoken                = { version = "10.2", features = ["aws_lc_rs"] }
