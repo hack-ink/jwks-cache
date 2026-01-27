@@ -38,8 +38,8 @@ Scope: JWKS caching behavior, registry lifecycle, HTTP semantics, persistence, m
 
 ## Metrics and tracing
 
-- Metrics flow through the `metrics` facade.
-- `install_default_exporter` installs the bundled Prometheus recorder.
+- Metrics flow through the `metrics` facade when the `metrics` feature is enabled.
+- The `install_default_exporter` function installs the bundled Prometheus recorder when the `prometheus` feature is enabled.
 - Cache operations emit structured `tracing` spans keyed by tenant and provider identifiers.
 
 ## Security and validation
@@ -81,7 +81,7 @@ Handles JWKS fetches, retry policies, and HTTP caching semantics.
 
 ### `metrics`
 
-Captures per-provider metrics and exposes Prometheus-compatible exporters.
+Captures per-provider metrics and exposes Prometheus-compatible exporters when enabled.
 
 ### `security`
 

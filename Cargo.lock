@@ -809,7 +809,7 @@ dependencies = [
 
 [[package]]
 name = "jwks-cache"
-version = "0.1.5"
+version = "0.2.0"
 dependencies = [
  "base64",
  "chrono",
@@ -1902,6 +1902,7 @@ dependencies = [
  "idna",
  "percent-encoding",
  "serde",
+ "serde_derive",
 ]
 
 [[package]]

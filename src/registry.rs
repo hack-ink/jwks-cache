@@ -12,13 +12,13 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 use url::Url;
 // self
+#[cfg(feature = "metrics")] use crate::metrics::{ProviderMetrics, ProviderMetricsSnapshot};
 use crate::{
 	_prelude::*,
 	cache::{
 		manager::{CacheManager, CacheSnapshot},
 		state::CacheState,
 	},
-	metrics::{ProviderMetrics, ProviderMetricsSnapshot},
 	security::{self, SpkiFingerprint},
 };
 
@@ -555,9 +555,14 @@ impl Registry {
 
 		let key = TenantProviderKey::new(&registration.tenant_id, &registration.provider_id);
 		let manager = CacheManager::new(registration.clone())?;
+		#[cfg(feature = "metrics")]
 		let metrics = manager.metrics();
-		let handle =
-			Arc::new(ProviderHandle { registration: Arc::new(registration), manager, metrics });
+		let handle = Arc::new(ProviderHandle {
+			registration: Arc::new(registration),
+			manager,
+			#[cfg(feature = "metrics")]
+			metrics,
+		});
 
 		{
 			let mut state = self.inner.write().await;
@@ -566,10 +571,10 @@ impl Registry {
 		}
 
 		#[cfg(feature = "redis")]
-		if let Some(persistence) = &self.config.persistence {
-			if let Some(snapshot) = persistence.load(&key.tenant_id, &key.provider_id).await? {
-				handle.manager.restore_snapshot(snapshot).await?;
-			}
+		if let Some(persistence) = &self.config.persistence
+			&& let Some(snapshot) = persistence.load(&key.tenant_id, &key.provider_id).await?
+		{
+			handle.manager.restore_snapshot(snapshot).await?;
 		}
 
 		Ok(())
@@ -728,13 +733,17 @@ pub struct ProviderStatus {
 	/// Consecutive error count observed during refresh attempts.
 	pub error_count: u32,
 	/// Ratio of cache hits to total requests.
+	#[cfg(feature = "metrics")]
 	pub hit_rate: f64,
 	/// Ratio of served responses that were stale.
+	#[cfg(feature = "metrics")]
 	pub stale_serve_ratio: f64,
 	/// Metrics emitted to describe provider performance.
+	#[cfg(feature = "metrics")]
 	pub metrics: Vec<StatusMetric>,
 }
 impl ProviderStatus {
+	#[cfg(feature = "metrics")]
 	fn from_components(
 		registration: &IdentityProviderRegistration,
 		snapshot: CacheSnapshot,
@@ -808,9 +817,49 @@ impl ProviderStatus {
 			metrics: status_metrics,
 		}
 	}
+
+	#[cfg(not(feature = "metrics"))]
+	fn from_components(
+		registration: &IdentityProviderRegistration,
+		snapshot: CacheSnapshot,
+	) -> Self {
+		let mut last_refresh = None;
+		let mut next_refresh = None;
+		let mut expires_at = None;
+		let mut error_count = 0;
+		let state = match &snapshot.state {
+			CacheState::Empty => ProviderState::Empty,
+			CacheState::Loading => ProviderState::Loading,
+			CacheState::Ready(payload) => {
+				last_refresh = Some(payload.last_refresh_at);
+				next_refresh = snapshot.to_datetime(payload.next_refresh_at);
+				expires_at = snapshot.to_datetime(payload.expires_at);
+				error_count = payload.error_count;
+				ProviderState::Ready
+			},
+			CacheState::Refreshing(payload) => {
+				last_refresh = Some(payload.last_refresh_at);
+				next_refresh = snapshot.to_datetime(payload.next_refresh_at);
+				expires_at = snapshot.to_datetime(payload.expires_at);
+				error_count = payload.error_count;
+				ProviderState::Refreshing
+			},
+		};
+
+		Self {
+			tenant_id: registration.tenant_id.clone(),
+			provider_id: registration.provider_id.clone(),
+			state,
+			last_refresh,
+			next_refresh,
+			expires_at,
+			error_count,
+		}
+	}
 }
 
 /// Metric sample used in provider status responses.
+#[cfg(feature = "metrics")]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct StatusMetric {
 	/// Metric name following the monitoring schema.
@@ -821,6 +870,7 @@ pub struct StatusMetric {
 	#[serde(default)]
 	pub labels: HashMap<String, String>,
 }
+#[cfg(feature = "metrics")]
 impl StatusMetric {
 	fn new(name: impl Into<String>, value: f64, tenant: &str, provider: &str) -> Self {
 		let mut labels = HashMap::with_capacity(2);
@@ -858,14 +908,22 @@ impl Default for RegistryConfig {
 struct ProviderHandle {
 	registration: Arc<IdentityProviderRegistration>,
 	manager: CacheManager,
+	#[cfg(feature = "metrics")]
 	metrics: Arc<ProviderMetrics>,
 }
 impl ProviderHandle {
 	async fn status(&self) -> ProviderStatus {
 		let snapshot = self.manager.snapshot().await;
-		let metrics = self.metrics.snapshot();
+		#[cfg(feature = "metrics")]
+		let status = {
+			let metrics = self.metrics.snapshot();
 
-		ProviderStatus::from_components(&self.registration, snapshot, metrics)
+			ProviderStatus::from_components(&self.registration, snapshot, metrics)
+		};
+		#[cfg(not(feature = "metrics"))]
+		let status = ProviderStatus::from_components(&self.registration, snapshot);
+
+		status
 	}
 }
 

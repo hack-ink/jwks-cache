@@ -60,7 +60,7 @@ The crate is fully async and designed for the Tokio multi-threaded runtime.
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
 	tracing_subscriber::fmt::init();
-	// Optional Prometheus exporter (metrics are always sent via the `metrics` facade).
+	// Optional Prometheus exporter (requires the `prometheus` feature).
 	jwks_cache::install_default_exporter()?;
 
 	let registry = jwks_cache::Registry::builder()
@@ -144,7 +144,7 @@ The optional third argument to `Registry::resolve` lets you pass the `kid` up fr
 - `register` / `unregister` keep provider state scoped to each tenant.
 - `resolve` serves cached JWKS payloads with per-tenant metrics tagging.
 - `refresh` triggers an immediate background refresh without waiting for TTL expiry.
-- `provider_status` and `all_statuses` expose lifecycle state, expiry, error counters, hit rates, and the metrics that power `jwks-cache.openapi.yaml`.
+- `provider_status` and `all_statuses` expose lifecycle state, expiry, and error counters, plus hit rates and status metrics when the `metrics` feature is enabled.
 
 ### Security controls
 
@@ -154,12 +154,15 @@ The optional third argument to `Registry::resolve` lets you pass the `kid` up fr
 
 ### Feature flags
 
-- `redis`: enable Redis-backed snapshots for `persist_all` and `restore_from_persistence`. When disabled, these methods are cheap no-ops so lifecycle code can stay shared.
+- The `redis` feature enables Redis-backed snapshots for `persist_all` and `restore_from_persistence`. When disabled, these methods are cheap no-ops so lifecycle code can stay shared.
+- The `metrics` feature enables metrics emission through the `metrics` facade.
+- The `prometheus` feature enables `install_default_exporter` to install the bundled Prometheus recorder (implies `metrics`).
+- The default features include `prometheus` and `metrics`; disable them with `default-features = false`.
 
 ## Observability
 
-- Metrics emitted via the `metrics` facade include `jwks_cache_requests_total`, `jwks_cache_hits_total`, `jwks_cache_misses_total`, `jwks_cache_stale_total`, `jwks_cache_refresh_total`, `jwks_cache_refresh_errors_total`, and the `jwks_cache_refresh_duration_seconds` histogram.
-- `install_default_exporter` installs the bundled Prometheus recorder (`metrics-exporter-prometheus`) and exposes a `PrometheusHandle` for HTTP servers to serve `/metrics`.
+- Metrics emitted via the `metrics` facade (requires the `metrics` feature) include `jwks_cache_requests_total`, `jwks_cache_hits_total`, `jwks_cache_misses_total`, `jwks_cache_stale_total`, `jwks_cache_refresh_total`, `jwks_cache_refresh_errors_total`, and the `jwks_cache_refresh_duration_seconds` histogram.
+- The `install_default_exporter` function installs the bundled Prometheus recorder (`metrics-exporter-prometheus`) and exposes a `PrometheusHandle` for HTTP servers to serve `/metrics` (requires the `prometheus` feature).
 - Every cache operation is instrumented with `tracing` spans keyed by tenant and provider identifiers, making it easy to correlate logs, traces, and metrics.
 
 ## Persistence & Warm Starts

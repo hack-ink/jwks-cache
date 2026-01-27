@@ -15,6 +15,7 @@ use tokio::{
 	time,
 };
 // self
+#[cfg(feature = "metrics")] use crate::metrics::{self, ProviderMetrics};
 #[cfg(feature = "redis")] use crate::registry::PersistentSnapshot;
 use crate::{
 	_prelude::*,
@@ -27,7 +28,6 @@ use crate::{
 		retry::{AttemptBudget, RetryExecutor},
 		semantics::{Freshness, base_request, evaluate_freshness, evaluate_revalidation},
 	},
-	metrics::{self, ProviderMetrics},
 	registry::IdentityProviderRegistration,
 };
 
@@ -41,6 +41,7 @@ pub struct CacheManager {
 	client: Arc<Client>,
 	entry: Arc<RwLock<CacheEntry>>,
 	single_flight: Arc<Mutex<()>>,
+	#[cfg(feature = "metrics")]
 	metrics: Arc<ProviderMetrics>,
 }
 impl CacheManager {
@@ -54,14 +55,25 @@ impl CacheManager {
 			.connect_timeout(Duration::from_secs(5))
 			.build()?;
 
-		Ok(Self::with_parts(registration, client, ProviderMetrics::new()))
+		#[cfg(feature = "metrics")]
+		let manager = Self::with_parts(registration, client, ProviderMetrics::new());
+		#[cfg(not(feature = "metrics"))]
+		let manager = Self::with_parts(registration, client);
+
+		Ok(manager)
 	}
 
 	/// Build a cache manager using the supplied HTTP client (primarily for tests).
 	pub fn with_client(registration: IdentityProviderRegistration, client: Client) -> Self {
-		Self::with_parts(registration, client, ProviderMetrics::new())
+		#[cfg(feature = "metrics")]
+		let manager = Self::with_parts(registration, client, ProviderMetrics::new());
+		#[cfg(not(feature = "metrics"))]
+		let manager = Self::with_parts(registration, client);
+
+		manager
 	}
 
+	#[cfg(feature = "metrics")]
 	fn with_parts(
 		registration: IdentityProviderRegistration,
 		client: Client,
@@ -79,7 +91,21 @@ impl CacheManager {
 		}
 	}
 
+	#[cfg(not(feature = "metrics"))]
+	fn with_parts(registration: IdentityProviderRegistration, client: Client) -> Self {
+		let tenant = registration.tenant_id.clone();
+		let provider = registration.provider_id.clone();
+
+		Self {
+			registration: Arc::new(registration),
+			client: Arc::new(client),
+			entry: Arc::new(RwLock::new(CacheEntry::new(tenant, provider))),
+			single_flight: Arc::new(Mutex::new(())),
+		}
+	}
+
 	/// Access the per-provider metrics accumulator.
+	#[cfg(feature = "metrics")]
 	pub fn metrics(&self) -> Arc<ProviderMetrics> {
 		self.metrics.clone()
 	}
@@ -201,14 +227,17 @@ impl CacheManager {
 					match self.refresh_blocking(true).await? {
 						RefreshOutcome::Updated { jwks, from_cache } => {
 							if from_cache {
+								#[cfg(feature = "metrics")]
 								self.observe_hit(false);
 							} else {
+								#[cfg(feature = "metrics")]
 								self.observe_miss();
 							}
 
 							return Ok(jwks);
 						},
 						RefreshOutcome::Stale(jwks) => {
+							#[cfg(feature = "metrics")]
 							self.observe_hit(true);
 
 							return Ok(jwks);
@@ -219,6 +248,7 @@ impl CacheManager {
 					if !payload.is_expired(now) {
 						let jwks = payload.jwks.clone();
 
+						#[cfg(feature = "metrics")]
 						self.observe_hit(false);
 
 						if now >= payload.next_refresh_at {
@@ -234,14 +264,17 @@ impl CacheManager {
 						match self.refresh_blocking(false).await {
 							Ok(RefreshOutcome::Updated { jwks, from_cache }) => {
 								if from_cache {
+									#[cfg(feature = "metrics")]
 									self.observe_hit(false);
 								} else {
+									#[cfg(feature = "metrics")]
 									self.observe_miss();
 								}
 
 								return Ok(jwks);
 							},
 							Ok(RefreshOutcome::Stale(jwks)) => {
+								#[cfg(feature = "metrics")]
 								self.observe_hit(true);
 
 								return Ok(jwks);
@@ -250,6 +283,7 @@ impl CacheManager {
 								if payload.can_serve_stale(Instant::now()) {
 									tracing::warn!(error = %err, "refresh failed, serving stale data");
 
+									#[cfg(feature = "metrics")]
 									self.observe_hit(true);
 
 									return Ok(payload.jwks.clone());
@@ -261,8 +295,10 @@ impl CacheManager {
 						self.refresh_blocking(true).await?
 					{
 						if from_cache {
+							#[cfg(feature = "metrics")]
 							self.observe_hit(false);
 						} else {
+							#[cfg(feature = "metrics")]
 							self.observe_miss();
 						}
 						return Ok(jwks);
@@ -413,6 +449,7 @@ impl CacheManager {
 		let request = request;
 
 		while let AttemptBudget::Granted { timeout } = executor.attempt_budget() {
+			#[cfg(feature = "metrics")]
 			let attempt_started = Instant::now();
 			let fetch = fetch_jwks(&self.client, &self.registration, &request, timeout).await;
 
@@ -463,6 +500,7 @@ impl CacheManager {
 					let jwks = payload.jwks.clone();
 
 					self.commit_success(mode, payload).await;
+					#[cfg(feature = "metrics")]
 					self.observe_refresh_success(attempt_started.elapsed());
 
 					return Ok(RefreshOutcome::Updated { jwks, from_cache: false });
@@ -503,6 +541,7 @@ impl CacheManager {
 			},
 		}
 
+		#[cfg(feature = "metrics")]
 		self.observe_refresh_error();
 
 		if !force_revalidation
@@ -569,6 +608,7 @@ impl CacheManager {
 		}
 	}
 
+	#[cfg(feature = "metrics")]
 	fn observe_hit(&self, stale: bool) {
 		let tenant = &self.registration.tenant_id;
 		let provider = &self.registration.provider_id;
@@ -578,6 +618,7 @@ impl CacheManager {
 		self.metrics.record_hit(stale);
 	}
 
+	#[cfg(feature = "metrics")]
 	fn observe_miss(&self) {
 		let tenant = &self.registration.tenant_id;
 		let provider = &self.registration.provider_id;
@@ -587,6 +628,7 @@ impl CacheManager {
 		self.metrics.record_miss();
 	}
 
+	#[cfg(feature = "metrics")]
 	fn observe_refresh_success(&self, duration: Duration) {
 		let tenant = &self.registration.tenant_id;
 		let provider = &self.registration.provider_id;
@@ -596,6 +638,7 @@ impl CacheManager {
 		self.metrics.record_refresh_success(duration);
 	}
 
+	#[cfg(feature = "metrics")]
 	fn observe_refresh_error(&self) {
 		let tenant = &self.registration.tenant_id;
 		let provider = &self.registration.provider_id;

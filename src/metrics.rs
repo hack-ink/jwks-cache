@@ -1,12 +1,11 @@
 //! Metrics helpers and per-provider telemetry bookkeeping.
 
 // std
-use std::sync::{
-	OnceLock,
-	atomic::{AtomicU64, Ordering},
-};
+#[cfg(feature = "prometheus")] use std::sync::OnceLock;
+use std::sync::atomic::{AtomicU64, Ordering};
 // crates.io
 use metrics::Label;
+#[cfg(feature = "prometheus")]
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 use smallvec::SmallVec;
 // self
@@ -23,6 +22,7 @@ const METRIC_REFRESH_DURATION: &str = "jwks_cache_refresh_duration_seconds";
 const METRIC_REFRESH_ERRORS: &str = "jwks_cache_refresh_errors_total";
 
 /// Shared Prometheus handle installed by [`install_default_exporter`].
+#[cfg(feature = "prometheus")]
 static PROMETHEUS_HANDLE: OnceLock<PrometheusHandle> = OnceLock::new();
 
 /// Thread-safe metrics accumulator for a single provider registration.
@@ -121,6 +121,7 @@ impl ProviderMetricsSnapshot {
 /// Install the default Prometheus recorder backed by `metrics`.
 ///
 /// Multiple invocations are safe; subsequent calls become no-ops once the recorder is installed.
+#[cfg(feature = "prometheus")]
 pub fn install_default_exporter() -> Result<()> {
 	if PROMETHEUS_HANDLE.get().is_some() {
 		return Ok(());
@@ -135,6 +136,7 @@ pub fn install_default_exporter() -> Result<()> {
 }
 
 /// Access the global Prometheus exporter handle when installed.
+#[cfg(feature = "prometheus")]
 pub fn prometheus_handle() -> Option<&'static PrometheusHandle> {
 	PROMETHEUS_HANDLE.get()
 }
@@ -231,7 +233,7 @@ mod tests {
 				(key.kind() == MetricKind::Counter
 					&& Borrow::<str>::borrow(key.key().name()) == name
 					&& labels_match(key, labels))
-				.then(|| match value {
+				.then_some(match value {
 					DebugValue::Counter(value) => *value,
 					_ => 0,
 				})
@@ -273,7 +275,7 @@ mod tests {
 		labels.len() == expected_sorted.len()
 			&& labels
 				.into_iter()
-				.zip(expected_sorted.into_iter())
+				.zip(expected_sorted)
 				.all(|((lk, lv), (ek, ev))| lk == ek && lv == ev)
 	}
 

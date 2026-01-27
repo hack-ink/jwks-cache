@@ -40,6 +40,7 @@ pub enum Error {
 	#[error("Validation failed for {field}: {reason}")]
 	Validation { field: &'static str, reason: String },
 }
+#[cfg(feature = "metrics")]
 impl<T> From<metrics::SetRecorderError<T>> for Error
 where
 	T: std::fmt::Display,

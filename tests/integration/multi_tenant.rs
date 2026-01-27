@@ -77,14 +77,14 @@ async fn multi_tenant_registry_operations_and_status() -> Result<()> {
 	let reg_a = IdentityProviderRegistration::new(
 		"tenant-a",
 		"primary",
-		base.join(path_a).expect("join path").to_string(),
+		base.join(path_a).expect("join path"),
 	)
 	.expect("registration")
 	.with_require_https(false);
 	let reg_b = IdentityProviderRegistration::new(
 		"tenant-b",
 		"secondary",
-		base.join(path_b).expect("join path").to_string(),
+		base.join(path_b).expect("join path"),
 	)
 	.expect("registration")
 	.with_require_https(false);
@@ -111,15 +111,18 @@ async fn multi_tenant_registry_operations_and_status() -> Result<()> {
 	);
 	assert!(status_a.last_refresh.is_some(), "last refresh timestamp missing");
 	assert!(status_a.next_refresh.is_some(), "next refresh timestamp missing");
-	assert!(
-		status_a.hit_rate >= 0.5 && status_a.hit_rate <= 1.0,
-		"unexpected hit rate {}",
-		status_a.hit_rate
-	);
-	assert!(
-		status_a.metrics.iter().any(|metric| metric.name == "jwks_cache_hits_total"),
-		"hits counter missing from status metrics"
-	);
+	#[cfg(feature = "metrics")]
+	{
+		assert!(
+			status_a.hit_rate >= 0.5 && status_a.hit_rate <= 1.0,
+			"unexpected hit rate {}",
+			status_a.hit_rate
+		);
+		assert!(
+			status_a.metrics.iter().any(|metric| metric.name == "jwks_cache_hits_total"),
+			"hits counter missing from status metrics"
+		);
+	}
 
 	let statuses = registry.all_statuses().await;
 	assert_eq!(statuses.len(), 2, "expected two provider statuses");

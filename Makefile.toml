@@ -1,22 +1,28 @@
 # Format
-# | task      | type    | cwd |
-# | ----      | ------- | --- |
-# | fmt       | command |     |
-# | fmt-check | command |     |
+# | task          | type      | cwd |
+# | ------------  | --------- | --- |
+# | fmt           | composite |     |
+# | fmt-check     | composite |     |
+# | fmt-rust      | script    |     |
+# | fmt-rust-check| extend    |     |
 
 [tasks.fmt]
 workspace = false
-command = "cargo"
-args = ["fmt"]
+dependencies = ["fmt-rust"]
 
 [tasks.fmt-check]
 workspace = false
-command = "cargo"
-args = [
-	"fmt",
-	"--",
-	"--check"
-]
+dependencies = ["fmt-rust-check"]
+
+[tasks.fmt-rust]
+workspace = false
+script = "cargo +nightly fmt ${FMT_RUST_ARGS}"
+env = { FMT_RUST_ARGS = "" }
+
+[tasks.fmt-rust-check]
+workspace = false
+extend = "fmt-rust"
+env = { FMT_RUST_ARGS = "-- --check" }
 
 
 # Lint
