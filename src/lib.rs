@@ -3,9 +3,6 @@
 
 #![deny(clippy::all, missing_docs, unused_crate_dependencies)]
 
-#[cfg(test)] use tracing_subscriber as _;
-#[cfg(test)] use wiremock as _;
-
 pub mod cache;
 pub mod http;
 pub mod metrics;
@@ -23,6 +20,11 @@ mod _prelude {
 	pub use tokio::time::Instant;
 
 	pub use crate::{Error, Result};
+}
+#[cfg(test)]
+mod _test {
+	use tracing_subscriber as _;
+	use wiremock as _;
 }
 
 pub use crate::{

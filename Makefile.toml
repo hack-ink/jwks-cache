@@ -1,0 +1,84 @@
+# Format
+# | task      | type    | cwd |
+# | ----      | ------- | --- |
+# | fmt       | command |     |
+# | fmt-check | command |     |
+
+[tasks.fmt]
+workspace = false
+command = "cargo"
+args = ["fmt"]
+
+[tasks.fmt-check]
+workspace = false
+command = "cargo"
+args = [
+	"fmt",
+	"--",
+	"--check"
+]
+
+
+# Lint
+# | task     | type    | cwd |
+# | ----     | ------- | --- |
+# | lint     | command |     |
+# | lint-fix | command |     |
+
+[tasks.lint]
+workspace = false
+command = "cargo"
+args = [
+	"clippy",
+	"--all-targets",
+	"--all-features",
+	"--",
+	"-D",
+	"warnings"
+]
+
+[tasks.lint-fix]
+workspace = false
+command = "cargo"
+args = [
+	"clippy",
+	"--fix",
+	"--allow-dirty",
+	"--all-targets",
+	"--all-features"
+]
+
+
+# Test
+# | task       | type    | cwd |
+# | ---------- | ------- | --- |
+# | test       | command |     |
+# | test-redis | command |     |
+
+[tasks.test]
+workspace = false
+command = "cargo"
+args = ["test"]
+
+[tasks.test-redis]
+workspace = false
+command = "cargo"
+args = [
+	"test",
+	"--features",
+	"redis"
+]
+
+
+# Meta
+# | task   | type      | cwd |
+# | ------ | --------- | --- |
+# | checks | composite |     |
+
+[tasks.checks]
+workspace = false
+dependencies = [
+	"fmt-check",
+	"lint",
+	"test"
+]
